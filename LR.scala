@@ -1,10 +1,11 @@
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.ml.regression.LinearRegressionModel
-import breeze.linalg.{DenseVector, DenseMatrix}
+import breeze.linalg.{DenseVector, DenseMatrix, sum}
 import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.sql.functions.{col, rand, randn}
 import org.apache.spark.ml.regression.LinearRegression
-import spark.implicits._
+import org.apache.spark.sql.DataFrame
+import scala.util.Random
 
 object LinearRegressionComparison {
   private val numRows = 100000
@@ -18,30 +19,86 @@ object LinearRegressionComparison {
       .master("local[*]")
       .getOrCreate()
 
-    val (sparkModel, manualWeights, manualB) = run(spark)
-    
-    println("Spark Model Coefficients: " + sparkModel.coefficients)
-    println("Spark Intercept: " + sparkModel.intercept)
-    println("Manual Weights: " + manualWeights)
-    println("Manual Intercept: " + manualB)
+    val (sparkModel, manualModel) = run(spark)
     
     spark.stop()
   }
 
-  def run(spark: SparkSession): (LinearRegressionModel, DenseVector[Double], Double) = {
-    // Генерировать данные
+  // параметрический класс
+  class ManualParams(
+    var learningRate: Double = 0.03,
+    var numIterations: Int = 5000,
+    var batchSize: Int = 256,
+    var regParam: Double = 0.1,
+    var elasticNetParam: Double = 0.8
+  ) extends Serializable
+
+  // модели
+  class ManualModel(
+    val coefficients: DenseVector[Double],
+    val intercept: Double
+  ) extends Serializable {
+    def predict(features: DenseVector[Double]): Double = {
+      coefficients.dot(features) + intercept
+    }
+  }
+
+  //  класс оценщика
+  class ManualEstimator(params: ManualParams = new ManualParams()) extends Serializable {
+    def fit(X: DenseMatrix[Double], y: DenseVector[Double]): ManualModel = {
+      
+      var w = DenseVector.zeros[Double](X.cols)
+      var b = 0.0
+      
+      for (iter <- 0 until params.numIterations) {
+        val miniBatchIndices = Random
+          .shuffle((0 until X.rows).toList)
+          .take(params.batchSize)
+        
+        val XBatch = X(miniBatchIndices, ::).toDenseMatrix
+        val yBatch = y(miniBatchIndices).toDenseVector
+        
+        val predictions = XBatch * w + b
+        val errors = predictions - yBatch
+        
+        // Вычисление градиента
+        val gradientW = (XBatch.t * errors) * (1.0 / params.batchSize)
+        val gradientB = sum(errors) * (1.0 / params.batchSize)
+        
+        // регуляризации
+        val l2Reg = w * (params.regParam * params.elasticNetParam)
+        val l1Reg = DenseVector.zeros[Double](w.length)
+        
+        w -= params.learningRate * (gradientW + l2Reg + l1Reg)
+        b -= params.learningRate * gradientB
+      }
+      
+      new ManualModel(w, b)
+    }
+  }
+
+  def run(spark: SparkSession): (LinearRegressionModel, ManualModel) = {
     val (training, breezeX, breezeY) = generateData(spark)
     
     // Обучение модели Spark
     val sparkModel = trainSparkModel(training)
     
-    // Выполнение обучения вручную
-    val (manualWeights, manualB) = trainManualImplementation(breezeX, breezeY)
+    // Выполнение обучения 
+    val manualParams = new ManualParams(
+      learningRate = 0.03,
+      numIterations = 5000,
+      regParam = 0.1,
+      elasticNetParam = 0.8
+    )
     
-    (sparkModel, manualWeights, manualB)
+    val manualEstimator = new ManualEstimator(manualParams)
+    val manualModel = manualEstimator.fit(breezeX, breezeY)
+    
+    (sparkModel, manualModel)
   }
 
   private def generateData(spark: SparkSession) = {
+    import spark.implicits._
     
     val rawData = spark.range(numRows)
       .withColumn("c1", rand(seed=42) * 10)
@@ -62,13 +119,13 @@ object LinearRegressionComparison {
 
     val training = assembler.transform(dataWithLabel).select("features", "label")
     
-    // Breeze Формат 
+    //  Breeze Формат 
     val (breezeX, breezeY) = convertToBreeze(training)
     
     (training, breezeX, breezeY)
   }
 
-  private def convertToBreeze(training: org.apache.spark.sql.DataFrame) = {
+  private def convertToBreeze(training: DataFrame) = {
     val rows = training.collect()
     val breezeX = DenseMatrix.zeros[Double](numRows, numFeatures)
     val breezeY = DenseVector.zeros[Double](numRows)
@@ -82,40 +139,13 @@ object LinearRegressionComparison {
     (breezeX, breezeY)
   }
 
-  private def trainSparkModel(training: org.apache.spark.sql.DataFrame) = {
+  private def trainSparkModel(training: DataFrame) = {
     val lr = new LinearRegression()
       .setMaxIter(10000)
-      .setRegParam(0.0)
+      .setRegParam(0.1)
       .setElasticNetParam(0.8)
 
     lr.fit(training)
-  }
-
-  def trainManualImplementation(
-    breezeX: DenseMatrix[Double],
-    breezeY: DenseVector[Double]
-  ): (DenseVector[Double], Double) = {
-    var w = DenseVector(0.0, 0.0, 0.0)
-    var b = 0.0
-    val learningRate = 0.03
-    val numIterations = 5000
-    val batchSize = 256
-
-    for (iter <- 0 until numIterations) {
-      val miniBatchIndices = scala.util.Random.shuffle((0 until numRows).toList).take(batchSize)
-      val XBatch = breezeX(miniBatchIndices, ::).toDenseMatrix
-      val yBatch = breezeY(miniBatchIndices).toDenseVector
-
-      val predictions = XBatch * w + b
-      val errors = predictions - yBatch
-      val gradientW = (XBatch.t * errors) * (1.0 / batchSize)
-      val gradientB = breeze.linalg.sum(errors) * (1.0 / batchSize)
-
-      w -= learningRate * gradientW
-      b -= learningRate * gradientB
-    }
-    
-    (w, b)
   }
 
   def calculateAdjustedR2(spark: SparkSession): Double = {

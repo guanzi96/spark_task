@@ -48,7 +48,7 @@ class LinearRegressionComparisonTest extends AnyFunSuite with BeforeAndAfterAll 
       s"Intercept слишком большая разница: $sparkIntercept vs $manualIntercept (diff $diff)")
   }
   
-  test("Manual implementation should capture main relationships") {
+  test("Manual implementation Соответствие ") {
     sparkCoefficients.zip(manualCoefficients.toArray).foreach {
       case (spark, manual) =>
         assert((spark * manual) >= 0, 
