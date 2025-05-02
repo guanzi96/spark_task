@@ -1,9 +1,9 @@
-// 项目基本信息
+// Основная информация 
 name := "LinearRegressionComparison"
 version := "1.0.0"
-scalaVersion := "2.12.15"  // 需要与Spark 3.3.0兼容的版本
+scalaVersion := "2.12.15"  
 
-// 依赖库配置
+// настройка
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-sql" % "3.3.0",
   "org.apache.spark" %% "spark-mllib" % "3.3.0",
