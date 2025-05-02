@@ -31,7 +31,7 @@ object LinearRegressionComparison {
     var batchSize: Int = 256,
     var regParam: Double = 0.1,
     var elasticNetParam: Double = 0.8
-  ) extends Serializable
+  )
 
   // модели
   class ManualModel(
@@ -67,9 +67,8 @@ object LinearRegressionComparison {
         
         // регуляризации
         val l2Reg = w * (params.regParam * params.elasticNetParam)
-        val l1Reg = DenseVector.zeros[Double](w.length)
         
-        w -= params.learningRate * (gradientW + l2Reg + l1Reg)
+        w -= params.learningRate * (gradientW + l2Reg)
         b -= params.learningRate * gradientB
       }
       
