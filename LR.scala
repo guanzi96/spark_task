@@ -98,7 +98,6 @@ object LinearRegressionComparison {
   }
 
   private def generateData(spark: SparkSession) = {
-    import spark.implicits._
     
     val rawData = spark.range(numRows)
       .withColumn("c1", rand(seed=42) * 10)
