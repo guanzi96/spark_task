@@ -86,6 +86,7 @@ object LinearRegressionComparison {
     val manualParams = new ManualParams(
       learningRate = 0.03,
       numIterations = 5000,
+      batchSize = 256,
       regParam = 0.1,
       elasticNetParam = 0.8
     )
